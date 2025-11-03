@@ -1,0 +1,68 @@
+// Schema für Foto-Identifikations- und Ordnungssystem
+
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/foto_identifikation_system/nextjs_space/node_modules/.prisma/client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model Photo {
+  id                String   @id @default(cuid())
+  originalName      String
+  newName           String
+  cloudStoragePath  String   @unique
+  location          String   // Ort-Kategorie (z.B. Strand, Restaurant, etc.)
+  scene             String   // Szene-Beschreibung (z.B. sonnig, gemütlich, etc.)
+  sequenceNumber    Int      // Fortlaufende Nummer für die Kategorie
+  
+  // Geodaten
+  latitude          Float?   // GPS Breitengrad
+  longitude         Float?   // GPS Längengrad
+  altitude          Float?   // GPS Höhe
+  
+  // EXIF Metadaten
+  exifData          Json?    // Alle EXIF-Daten als JSON
+  dateTimeTaken     DateTime?// Aufnahmedatum aus EXIF
+  cameraModel       String?  // Kameramodell
+  
+  // Status und Upload-Info
+  uploadBatch       String   // Batch-ID für zusammengehörige Uploads
+  processed         Boolean  @default(false)
+  processingError   String?  // Fehler bei der Verarbeitung
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("photos")
+}
+
+model CategoryCounter {
+  id                String @id @default(cuid())
+  categoryName      String @unique // Ort-Kategorie (z.B. "Strand", "Restaurant")
+  currentCounter    Int    @default(0) // Aktuelle höchste Nummer für diese Kategorie
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("category_counters")
+}
+
+model UploadBatch {
+  id                String @id @default(cuid())
+  batchId           String @unique
+  totalFiles        Int
+  processedFiles    Int    @default(0)
+  completedFiles    Int    @default(0)
+  failedFiles       Int    @default(0)
+  status            String @default("processing") // processing, completed, failed
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("upload_batches")
+}
