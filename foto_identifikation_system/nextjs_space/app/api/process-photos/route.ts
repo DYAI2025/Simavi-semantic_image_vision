@@ -1,4 +1,3 @@
-
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -6,6 +5,8 @@ import { PrismaClient } from '@prisma/client';
 import { uploadFile } from '@/lib/s3';
 import { extractExifData, extractGeoData, getCameraModel, getDateTimeTaken } from '@/lib/exif-utils';
 import { analyzeImage } from '@/lib/vision-api-client';
+import { globalQueue } from '@/lib/queue-manager';
+import { visionRateLimiter } from '@/lib/rate-limiter';
 
 const prisma = new PrismaClient();
 
@@ -82,9 +83,12 @@ export async function POST(request: NextRequest) {
               placeName = await getPlaceName(geoData.latitude, geoData.longitude);
             }
 
-            // Vision AI für Bildanalyse
+            // Vision AI für Bildanalyse - using queue and rate limiter
             const base64String = buffer.toString('base64');
-            const analysisResult = await analyzeImage(base64String, file.name, placeName);
+            const analysisResult = await globalQueue.add(file.name, async () => {
+              await visionRateLimiter.checkLimit();
+              return analyzeImage(base64String, file.name, placeName);
+            });
 
             if (!analysisResult || !analysisResult.location || !analysisResult.scene) {
               throw new Error('KI-Analyse fehlgeschlagen - unvollständige Ergebnisse');
@@ -194,8 +198,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-
 
 async function getPlaceName(latitude: number, longitude: number): Promise<string | null> {
   try {

@@ -6,6 +6,8 @@ import { PrismaClient } from '@prisma/client';
 import { uploadFile } from '@/lib/s3';
 import { extractExifData, extractGeoData, getCameraModel, getDateTimeTaken } from '@/lib/exif-utils';
 import { analyzeImage } from '@/lib/vision-api-client';
+import { globalQueue } from '@/lib/queue-manager';
+import { visionRateLimiter } from '@/lib/rate-limiter';
 import fs from 'fs';
 import path from 'path';
 
@@ -118,9 +120,12 @@ export async function POST(request: NextRequest) {
             // File zu S3 hochladen
             const cloudStoragePath = await uploadFile(buffer, file.name);
 
-            // Vision AI Analyse
+            // Vision AI Analyse - using queue and rate limiter
             const base64String = buffer.toString('base64');
-            const analysisResult = await analyzeImage(base64String, file.name);
+            const analysisResult = await globalQueue.add(file.name, async () => {
+              await visionRateLimiter.checkLimit();
+              return analyzeImage(base64String, file.name, null); // Note: placeName is null for Google Drive
+            });
 
             if (!analysisResult || !analysisResult.location || !analysisResult.scene) {
               throw new Error('KI-Analyse fehlgeschlagen');
