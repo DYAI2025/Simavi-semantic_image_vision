@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { uploadFile } from '@/lib/s3';
 import { extractExifData, extractGeoData, getCameraModel, getDateTimeTaken } from '@/lib/exif-utils';
+import { analyzeImage } from '@/lib/vision-api-client';
 
 const prisma = new PrismaClient();
 
@@ -194,94 +195,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function analyzeImage(base64String: string, fileName: string, placeName: string | null): Promise<{ location: string; scene: string } | null> {
-  try {
-    const placeContext = placeName 
-      ? `\n\nZusätzliche Kontext-Information: Das Foto wurde aufgenommen bei/in "${placeName}". Wenn dies ein spezifischer Ort ist (z.B. eine Parkanlage, ein Restaurant, ein Denkmal), verwende diesen Namen als Ort-Kategorie. Ansonsten verwende eine allgemeine Kategorie.`
-      : '';
 
-    const response = await fetch('https://apps.abacus.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ABACUSAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1-mini',
-        messages: [{
-          role: "user", 
-          content: [
-            {
-              type: "text", 
-              text: `Analysiere dieses Bild und bestimme:
-1. Die Ort-Kategorie (z.B. Strand, Restaurant, Auto, Wald, Park, Büro, Zuhause, etc.) - maximal 2-3 Wörter auf Deutsch
-2. Eine Szene-Beschreibung mit einem Adjektiv/Wort auf Deutsch (z.B. sonnig, gemütlich, modern, dunkel, etc.)${placeContext}
-
-**WICHTIG FÜR SCHILDER:**
-Falls im Bild ein Schild, Plakat, Hinweisschild, Straßenschild, Wegweiser, Informationstafel oder ähnliches zu sehen ist:
-- Verwende "Schild" als Ort-Kategorie
-- Lies den Text auf dem Schild und verwende ihn als Szene-Beschreibung (z.B. "Parken-verboten", "Eingang-A", "Berlin-Hauptbahnhof", etc.)
-- Falls mehrere Texte auf dem Schild sind, verwende den wichtigsten/größten Text
-- Entferne Satzzeichen und verwende Bindestriche statt Leerzeichen
-
-Antworte nur in folgendem JSON-Format:
-{
-  "location": "Ort-Kategorie",
-  "scene": "Szene-Beschreibung"
-}
-
-Verwende nur deutsche Begriffe und halte sie kurz und prägnant. Für die Ort-Kategorie: Verwende Bindestriche statt Leerzeichen (z.B. "Central-Park" statt "Central Park").`
-            },
-            {
-              type: "image_url", 
-              image_url: {
-                url: `data:image/jpeg;base64,${base64String}`
-              }
-            }
-          ]
-        }],
-        response_format: { type: "json_object" },
-        max_tokens: 200,
-        temperature: 0.3,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Vision AI API Fehler: ${response.status}`);
-    }
-
-    const result = await response.json();
-    const content = result.choices?.[0]?.message?.content;
-    
-    if (!content) {
-      throw new Error('Keine Antwort von Vision AI erhalten');
-    }
-
-    const parsed = JSON.parse(content);
-    
-    if (!parsed.location || !parsed.scene) {
-      throw new Error('Unvollständige Vision AI Analyse');
-    }
-
-    // Leerzeichen durch Bindestriche ersetzen und Sonderzeichen entfernen
-    const sanitizeForFilename = (str: string) => {
-      return str
-        .trim()
-        .replace(/\s+/g, '-')
-        .replace(/[^a-zA-Z0-9äöüÄÖÜß\-]/g, '')
-        .replace(/-+/g, '-');
-    };
-
-    return {
-      location: sanitizeForFilename(parsed.location),
-      scene: sanitizeForFilename(parsed.scene)
-    };
-
-  } catch (error: any) {
-    console.error('Vision AI Analyse Fehler:', error);
-    throw new Error(`Vision AI Analyse fehlgeschlagen: ${error.message}`);
-  }
-}
 
 async function getPlaceName(latitude: number, longitude: number): Promise<string | null> {
   try {

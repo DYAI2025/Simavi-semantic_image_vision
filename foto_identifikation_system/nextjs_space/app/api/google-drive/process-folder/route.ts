@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { uploadFile } from '@/lib/s3';
 import { extractExifData, extractGeoData, getCameraModel, getDateTimeTaken } from '@/lib/exif-utils';
+import { analyzeImage } from '@/lib/vision-api-client';
 import fs from 'fs';
 import path from 'path';
 
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
 
             // Bild von Google Drive herunterladen
             const imageResponse = await fetch(
-              `https://i.ytimg.com/vi/2tSBIBSXGPA/sddefault.jpg`,
+              `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
               {
                 headers: {
                   'Authorization': `Bearer ${accessToken}`,
@@ -225,74 +226,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function analyzeImage(base64String: string, fileName: string) {
-  try {
-    const response = await fetch('https://apps.abacus.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.ABACUSAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1-mini',
-        messages: [{
-          role: "user", 
-          content: [
-            {
-              type: "text", 
-              text: `Analysiere dieses Bild und bestimme:
-1. Die Ort-Kategorie (z.B. Strand, Restaurant, Auto, Wald, Park, Büro, Zuhause, etc.) - ein einzelnes Wort auf Deutsch
-2. Eine Szene-Beschreibung mit einem Adjektiv/Wort auf Deutsch (z.B. sonnig, gemütlich, modern, dunkel, etc.)
 
-Antworte nur in folgendem JSON-Format:
-{
-  "location": "Ort-Kategorie",
-  "scene": "Szene-Beschreibung"
-}
-
-Verwende nur deutsche Begriffe und halte sie kurz und prägnant.`
-            },
-            {
-              type: "image_url", 
-              image_url: {
-                url: `data:image/jpeg;base64,${base64String}`
-              }
-            }
-          ]
-        }],
-        response_format: { type: "json_object" },
-        max_tokens: 150,
-        temperature: 0.3,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Vision AI API Fehler: ${response.status}`);
-    }
-
-    const result = await response.json();
-    const content = result.choices?.[0]?.message?.content;
-    
-    if (!content) {
-      throw new Error('Keine Antwort von Vision AI');
-    }
-
-    const parsed = JSON.parse(content);
-    
-    if (!parsed.location || !parsed.scene) {
-      throw new Error('Unvollständige Vision AI Analyse');
-    }
-
-    return {
-      location: parsed.location.trim(),
-      scene: parsed.scene.trim()
-    };
-
-  } catch (error: any) {
-    console.error('Vision AI Fehler:', error);
-    throw error;
-  }
-}
 
 async function getNextSequenceNumber(location: string): Promise<number> {
   try {

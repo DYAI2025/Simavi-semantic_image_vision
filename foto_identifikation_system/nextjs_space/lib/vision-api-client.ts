@@ -19,14 +19,13 @@ async function retry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   throw new Error('Retry failed');
 }
 
-// Hugging Face API
+// Hugging Face API - Vision Task with BLIP Model
 async function analyzeWithHuggingFace(base64: string, placeName: string | null): Promise<VisionResult> {
   const key = process.env.HUGGINGFACE_API_KEY;
   if (!key) throw new Error('HF_KEY missing');
 
-  const prompt = `Analysiere das Bild auf Deutsch:\n1. Ort-Kategorie (1-2 Wörter): z.B. Strand, Restaurant, Park\n2. Szene (1 Wort): z.B. sonnig, dunkel, modern\n${placeName ? `\nGPS-Kontext: ${placeName}` : ''}\n\nAntworte nur JSON: {"location":"...", "scene":"..."}`;
-
-  const res = await fetch('https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large', {
+  // First, get image caption using BLIP model
+  const captionRes = await fetch('https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${key}`,
@@ -34,18 +33,87 @@ async function analyzeWithHuggingFace(base64: string, placeName: string | null):
     },
     body: JSON.stringify({
       inputs: base64,
-      parameters: { max_length: 50 }
     })
   });
 
-  if (!res.ok) throw new Error(`HF Error: ${res.status}`);
+  if (!captionRes.ok) throw new Error(`HF Caption Error: ${captionRes.status}`);
   
-  const data = await res.json();
-  const caption = data[0]?.generated_text || '';
+  const captionData = await captionRes.json();
+  const caption = captionData[0]?.generated_text || '';
   
-  // Fallback auf simple Kategorisierung wenn HF nur Caption liefert
-  const location = extractLocation(caption) || 'Unbekannt';
-  const scene = extractScene(caption) || 'standard';
+  // Now make a separate text generation call to extract location/scene in our format
+  const placeContext = placeName 
+    ? `Zusätzlicher Kontext: Das Foto wurde aufgenommen bei/in "${placeName}". `
+    : '';
+
+  const textPrompt = `${placeContext}Bildbeschreibung: "${caption}"\n\nAnalysiere diese Bildbeschreibung und bestimme:
+1. Die Ort-Kategorie (z.B. Strand, Restaurant, Auto, Wald, Park, Büro, Zuhause, etc.) - maximal 2-3 Wörter auf Deutsch
+2. Eine Szene-Beschreibung mit einem Adjektiv/Wort auf Deutsch (z.B. sonnig, gemütlich, modern, dunkel, etc.)
+
+**WICHTIG FÜR SCHILDER:**
+Wenn die Bildbeschreibung Hinweise auf ein Schild, Plakat, Hinweisschild, Straßenschild, Wegweiser, Informationstafel oder ähnliches enthält:
+- Verwende "Schild" als Ort-Kategorie
+- Lies den Text in der Beschreibung und verwende ihn als Szene-Beschreibung (z.B. "Parken-verboten", "Eingang-A", "Berlin-Hauptbahnhof", etc.)
+- Falls mehrere Texte erwähnt werden, verwende den wichtigsten/größten Text
+- Entferne Satzzeichen und verwende Bindestriche statt Leerzeichen
+
+Antworte nur in folgendem JSON-Format:
+{
+  "location": "Ort-Kategorie",
+  "scene": "Szene-Beschreibung"
+}
+
+Verwende nur deutsche Begriffe und halte sie kurz und prägnant. Für die Ort-Kategorie: Verwende Bindestriche statt Leerzeichen (z.B. "Central-Park" statt "Central Park").`;
+
+  const textRes = await fetch('https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      inputs: textPrompt,
+      parameters: { 
+        max_new_tokens: 150,
+        return_full_text: false
+      }
+    })
+  });
+
+  if (!textRes.ok) throw new Error(`HF Text Error: ${textRes.status}`);
+  
+  const textData = await textRes.json();
+  const responseText = textData[0]?.generated_text || '';
+  
+  // Try to parse JSON from response
+  let location = 'Unbekannt';
+  let scene = 'standard';
+  
+  try {
+    // Try to extract JSON from the response
+    const jsonStart = responseText.indexOf('{');
+    const jsonEnd = responseText.lastIndexOf('}') + 1;
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      const jsonStr = responseText.substring(jsonStart, jsonEnd);
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.location && parsed.scene) {
+        location = sanitize(parsed.location);
+        scene = sanitize(parsed.scene);
+      } else {
+        // Fallback on simple extraction from the original caption
+        location = extractLocation(caption) || 'Unbekannt';
+        scene = extractScene(caption) || 'standard';
+      }
+    } else {
+      // Fallback on simple extraction from the original caption
+      location = extractLocation(caption) || 'Unbekannt';
+      scene = extractScene(caption) || 'standard';
+    }
+  } catch (e) {
+    // Fallback on simple extraction from the original caption
+    location = extractLocation(caption) || 'Unbekannt';
+    scene = extractScene(caption) || 'standard';
+  }
   
   return { location, scene };
 }
@@ -54,6 +122,10 @@ async function analyzeWithHuggingFace(base64: string, placeName: string | null):
 async function analyzeWithOpenAI(base64: string, placeName: string | null): Promise<VisionResult> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error('OPENAI_KEY missing');
+
+  const placeContext = placeName 
+    ? `\n\nZusätzliche Kontext-Information: Das Foto wurde aufgenommen bei/in "${placeName}". Wenn dies ein spezifischer Ort ist (z.B. eine Parkanlage, ein Restaurant, ein Denkmal), verwende diesen Namen als Ort-Kategorie. Ansonsten verwende eine allgemeine Kategorie.`
+    : '';
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -64,32 +136,61 @@ async function analyzeWithOpenAI(base64: string, placeName: string | null): Prom
     body: JSON.stringify({
       model: 'gpt-4o-mini',
       messages: [{
-        role: 'user',
+        role: "user", 
         content: [
           {
-            type: 'text',
-            text: `Analysiere das Bild auf Deutsch:\n1. Ort-Kategorie (1-2 Wörter): Strand, Restaurant, Park, Auto, etc.\n2. Szene-Wort: sonnig, dunkel, modern, gemütlich, etc.\n${placeName ? `\nGPS-Kontext: ${placeName}` : ''}\n\nJSON: {"location":"...", "scene":"..."}`
+            type: "text", 
+            text: `Analysiere dieses Bild und bestimme:
+1. Die Ort-Kategorie (z.B. Strand, Restaurant, Auto, Wald, Park, Büro, Zuhause, etc.) - maximal 2-3 Wörter auf Deutsch
+2. Eine Szene-Beschreibung mit einem Adjektiv/Wort auf Deutsch (z.B. sonnig, gemütlich, modern, dunkel, etc.)${placeContext}
+
+**WICHTIG FÜR SCHILDER:**
+Falls im Bild ein Schild, Plakat, Hinweisschild, Straßenschild, Wegweiser, Informationstafel oder ähnliches zu sehen ist:
+- Verwende "Schild" als Ort-Kategorie
+- Lies den Text auf dem Schild und verwende ihn als Szene-Beschreibung (z.B. "Parken-verboten", "Eingang-A", "Berlin-Hauptbahnhof", etc.)
+- Falls mehrere Texte auf dem Schild sind, verwende den wichtigsten/größten Text
+- Entferne Satzzeichen und verwende Bindestriche statt Leerzeichen
+
+Antworte nur in folgendem JSON-Format:
+{
+  "location": "Ort-Kategorie",
+  "scene": "Szene-Beschreibung"
+}
+
+Verwende nur deutsche Begriffe und halte sie kurz und prägnant. Für die Ort-Kategorie: Verwende Bindestriche statt Leerzeichen (z.B. "Central-Park" statt "Central Park").`
           },
           {
-            type: 'image_url',
-            image_url: { url: `data:image/jpeg;base64,${base64}` }
+            type: "image_url", 
+            image_url: {
+              url: `data:image/jpeg;base64,${base64}`
+            }
           }
         ]
       }],
-      max_tokens: 100,
-      temperature: 0.3
-    })
+      response_format: { type: "json_object" },
+      max_tokens: 200,
+      temperature: 0.3,
+    }),
   });
 
   if (!res.ok) throw new Error(`OpenAI Error: ${res.status}`);
   
-  const data = await res.json();
-  const content = data.choices[0]?.message?.content || '{}';
+  const result = await res.json();
+  const content = result.choices?.[0]?.message?.content;
+  
+  if (!content) {
+    throw new Error('Keine Antwort von OpenAI erhalten');
+  }
+
   const parsed = JSON.parse(content);
   
+  if (!parsed.location || !parsed.scene) {
+    throw new Error('Unvollständige OpenAI Analyse');
+  }
+
   return {
-    location: sanitize(parsed.location || 'Unbekannt'),
-    scene: sanitize(parsed.scene || 'standard')
+    location: sanitize(parsed.location),
+    scene: sanitize(parsed.scene)
   };
 }
 
