@@ -85,13 +85,25 @@ export async function POST(request: NextRequest) {
 
             // Vision AI für Bildanalyse - using queue and rate limiter
             const base64String = buffer.toString('base64');
+
+            console.log(`[Process] Starting analysis for ${file.name}`);
+
             const analysisResult = await globalQueue.add(file.name, async () => {
               await visionRateLimiter.checkLimit();
               return analyzeImage(base64String, file.name, placeName);
             });
 
+            console.log(`[Process] Analysis result for ${file.name}:`, analysisResult);
+
+            // Validate analysis result (allow fallback values)
             if (!analysisResult || !analysisResult.location || !analysisResult.scene) {
+              console.error(`[Process] Invalid analysis result for ${file.name}:`, analysisResult);
               throw new Error('KI-Analyse fehlgeschlagen - unvollständige Ergebnisse');
+            }
+
+            // Check if analysis used fallback (Unbekannt) - still process but log warning
+            if (analysisResult.location === 'Unbekannt') {
+              console.warn(`[Process] Fallback naming used for ${file.name}`);
             }
 
             // Sequenz-Nummer für Kategorie ermitteln
@@ -128,8 +140,13 @@ export async function POST(request: NextRequest) {
             });
 
           } catch (error: any) {
-            console.error(`Fehler bei Verarbeitung von ${file.name}:`, error);
+            console.error(`[Process] Error processing ${file.name}:`, error);
+            console.error(`[Process] Error stack:`, error.stack);
             failedCount++;
+
+            // Create detailed error message
+            const errorMessage = error.message || 'Unbekannter Fehler';
+            const detailedError = `${file.name}: ${errorMessage}`;
 
             // Fehler in Datenbank speichern
             try {
@@ -143,16 +160,16 @@ export async function POST(request: NextRequest) {
                   sequenceNumber: 0,
                   uploadBatch: batchId,
                   processed: false,
-                  processingError: error.message
+                  processingError: detailedError
                 }
               });
             } catch (dbError) {
-              console.error('Fehler beim Speichern in Datenbank:', dbError);
+              console.error('[Process] Database error:', dbError);
             }
 
-            sendData({ 
-              type: 'error', 
-              message: `Fehler bei ${file.name}: ${error.message}` 
+            sendData({
+              type: 'error',
+              message: detailedError
             });
           }
 
