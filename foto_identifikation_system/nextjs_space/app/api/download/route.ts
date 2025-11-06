@@ -1,12 +1,12 @@
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { downloadFile } from '@/lib/s3';
 import JSZip from 'jszip';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
   try {
@@ -107,7 +107,7 @@ async function downloadPhotoBatch(batchId: string, editedNames?: Record<string, 
     const zip = new JSZip();
 
     // Parallel alle Dateien laden und zum ZIP hinzufügen
-    const downloadPromises = photos.map(async (photo) => {
+    const downloadPromises = photos.map(async (photo: any) => {
       try {
         const signedUrl = await downloadFile(photo.cloudStoragePath);
         const response = await fetch(signedUrl);

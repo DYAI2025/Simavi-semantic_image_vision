@@ -1,8 +1,9 @@
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { uploadFile } from '@/lib/s3';
 import { extractExifData, extractGeoData, getCameraModel, getDateTimeTaken } from '@/lib/exif-utils';
 import { analyzeImage } from '@/lib/vision-api-client';
@@ -10,8 +11,8 @@ import { globalQueue } from '@/lib/queue-manager';
 import { visionRateLimiter } from '@/lib/rate-limiter';
 import fs from 'fs';
 import path from 'path';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/db';
+import { getNextSequenceNumber } from '@/lib/photo-utils';
 
 export async function POST(request: NextRequest) {
   try {
@@ -233,22 +234,4 @@ export async function POST(request: NextRequest) {
 
 
 
-async function getNextSequenceNumber(location: string): Promise<number> {
-  try {
-    const counter = await prisma.categoryCounter.upsert({
-      where: { categoryName: location },
-      update: {
-        currentCounter: { increment: 1 }
-      },
-      create: {
-        categoryName: location,
-        currentCounter: 1
-      }
-    });
 
-    return counter.currentCounter;
-  } catch (error) {
-    console.error('Fehler beim Generieren der Sequenznummer:', error);
-    return Math.floor(Math.random() * 1000) + 1;
-  }
-}
