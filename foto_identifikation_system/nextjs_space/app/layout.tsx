@@ -29,7 +29,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="de" suppressHydrationWarning>
-      <body className="font-sans">
+      <body>
         <ThemeProvider
           attribute="class"
           defaultTheme="light"
