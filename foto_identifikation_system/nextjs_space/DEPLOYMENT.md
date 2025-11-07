@@ -1,150 +1,215 @@
-# Deployment Guide: Simavi Semantic Image Vision System
+# Fly.io Deployment Anleitung
 
-This guide provides instructions for deploying the Simavi Semantic Image Vision System to Fly.io with password protection and proper LLM integration.
+## Voraussetzungen
 
-## Prerequisites
+1. **Fly.io Account erstellen**
+   - Besuchen Sie https://fly.io/app/sign-up
+   - Erstellen Sie einen Account (kostenloser Tier verfügbar)
 
-1. **Fly.io Account**: Sign up at [Fly.io](https://fly.io) if you don't have an account
-2. **Fly CLI**: Install the Fly.io command-line interface:
+2. **Flyctl CLI installieren**
+
+   **macOS/Linux:**
    ```bash
    curl -L https://fly.io/install.sh | sh
    ```
-3. **API Keys**: Obtain API keys for your preferred LLM provider(s):
-   - Hugging Face: Create an account and get an access token
-   - OpenAI: Sign up for an API key
-4. **AWS S3**: Set up an S3 bucket for image storage
-5. **Database**: Have PostgreSQL database credentials ready
 
-## Environment Configuration
-
-1. **Copy the environment file**:
-   ```bash
-   cd foto_identifikation_system/nextjs_space
-   cp .env.example .env
+   **Windows (PowerShell):**
+   ```powershell
+   pwsh -Command "iwr https://fly.io/install.ps1 -useb | iex"
    ```
 
-2. **Configure environment variables**:
-   - `DATABASE_URL`: Your PostgreSQL database connection string
-   - `HUGGINGFACE_API_KEY`: Your Hugging Face API token (recommended for cost savings)
-   - `OPENAI_API_KEY`: Your OpenAI API key (fallback option)
-   - `AWS_BUCKET_NAME`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`: S3 storage credentials
-   - `APP_PASSWORD`: Password for application access (should be strong and secure)
-   - `NEXTAUTH_SECRET`: Random secret string for authentication
-
-## Deployment Steps
-
-1. **Initialize Fly app** (if not already done by the fly.toml configuration):
+3. **Bei Fly.io anmelden**
    ```bash
-   cd foto_identifikation_system/nextjs_space
-   fly launch --generate-name
-   ```
-   Or if you have an existing app:
-   ```bash
-   fly launch --name your-app-name
+   flyctl auth login
    ```
 
-2. **Set environment variables**:
-   ```bash
-   fly secrets set DATABASE_URL="your_database_url"
-   fly secrets set HUGGINGFACE_API_KEY="your_hf_token"
-   fly secrets set OPENAI_API_KEY="your_openai_key"
-   fly secrets set AWS_ACCESS_KEY_ID="your_aws_access_key"
-   fly secrets set AWS_SECRET_ACCESS_KEY="your_aws_secret"
-   fly secrets set AWS_BUCKET_NAME="your_bucket_name"
-   fly secrets set AWS_REGION="your_aws_region"
-   fly secrets set APP_PASSWORD="your_strong_password"
-   fly secrets set NEXTAUTH_SECRET="your_random_auth_secret"
-   ```
+## Deployment Schritte
 
-3. **Set up a PostgreSQL database** on Fly.io:
-   ```bash
-   fly postgres create --name simavi-db
-   fly postgres attach simavi-db
-   ```
+### 1. PostgreSQL Datenbank erstellen
 
-4. **Deploy the application**:
-   ```bash
-   fly deploy
-   ```
+Erstellen Sie eine PostgreSQL Datenbank in der gleichen Region wie Ihre App:
 
-5. **Run database migrations** (after first deployment):
-   ```bash
-   fly ssh console
-   # Inside the console, run the Prisma migration commands
-   npx prisma migrate deploy
-   ```
+```bash
+flyctl postgres create --name simavi-db --region fra
+```
 
-## Accessing the Application
+Notieren Sie sich die Verbindungsdetails, insbesondere die DATABASE_URL.
 
-The application will be deployed with password protection. To access it:
+### 2. Datenbank mit der App verbinden
 
-### Using Browser
-- Navigate to your Fly.io app URL
-- You'll be prompted for a username and password
-- For basic auth, use any username and the value of `APP_PASSWORD` as the password
+```bash
+flyctl postgres attach simavi-db --app simavi-semantic-image-vision
+```
 
-### Using API
-- Include an Authorization header in your requests:
-  ```
-  Authorization: Basic [base64-encoded-credentials]
-  ```
-- Where credentials are in the format `username:APP_PASSWORD`
+Dies setzt automatisch die DATABASE_URL Umgebungsvariable für Ihre App.
 
-## LLM Configuration
+### 3. Secrets konfigurieren
 
-The application supports dual LLM providers with auto-fallback:
+Setzen Sie alle notwendigen Umgebungsvariablen als Secrets:
 
-1. **Primary**: Hugging Face (recommended for cost savings)
-   - Uses `Salesforce/blip-image-captioning-large` for image captioning
-   - Uses `mistralai/Mistral-7B-Instruct-v0.2` for structured output
+```bash
+# NextAuth Konfiguration
+flyctl secrets set NEXTAUTH_SECRET=$(openssl rand -base64 32) --app simavi-semantic-image-vision
+flyctl secrets set NEXTAUTH_URL=https://simavi-semantic-image-vision.fly.dev --app simavi-semantic-image-vision
 
-2. **Fallback**: OpenAI
-   - Uses `gpt-4o-mini` for direct image analysis
-   - More accurate but costs apply
+# AWS S3 Konfiguration
+flyctl secrets set AWS_BUCKET_NAME=your-bucket-name --app simavi-semantic-image-vision
+flyctl secrets set AWS_ACCESS_KEY_ID=your-access-key-id --app simavi-semantic-image-vision
+flyctl secrets set AWS_SECRET_ACCESS_KEY=your-secret-access-key --app simavi-semantic-image-vision
 
-If both providers are unavailable, the application will use a development fallback mode.
+# Vision AI - Hugging Face (Primary)
+flyctl secrets set HUGGINGFACE_API_KEY=hf_your_token_here --app simavi-semantic-image-vision
+
+# Vision AI - OpenAI (Fallback, optional)
+flyctl secrets set OPENAI_API_KEY=sk_your_key_here --app simavi-semantic-image-vision
+
+# App Password Protection
+flyctl secrets set APP_PASSWORD=your_secure_password --app simavi-semantic-image-vision
+
+# Google Drive OAuth (optional)
+flyctl secrets set GOOGLE_CLIENT_ID=your-client-id --app simavi-semantic-image-vision
+flyctl secrets set GOOGLE_CLIENT_SECRET=your-client-secret --app simavi-semantic-image-vision
+flyctl secrets set GOOGLE_DRIVE_ACCESS_TOKEN=your-token --app simavi-semantic-image-vision
+```
+
+### 4. App deployen
+
+Wechseln Sie in das Verzeichnis mit der fly.toml Datei:
+
+```bash
+cd foto_identifikation_system/nextjs_space
+```
+
+Deployen Sie die App:
+
+```bash
+flyctl deploy
+```
+
+Beim ersten Deploy wird die App automatisch erstellt, wenn sie noch nicht existiert.
+
+### 5. Deployment überwachen
+
+```bash
+# App Status prüfen
+flyctl status --app simavi-semantic-image-vision
+
+# Logs anzeigen
+flyctl logs --app simavi-semantic-image-vision
+
+# Health Check prüfen
+curl https://simavi-semantic-image-vision.fly.dev/api/health
+```
+
+### 6. Datenbank Migrationen
+
+Die Prisma Migrationen werden automatisch beim Start der App ausgeführt (siehe scripts/start.sh).
+
+Falls Sie manuelle Migrationen durchführen möchten:
+
+```bash
+# SSH in die laufende App
+flyctl ssh console --app simavi-semantic-image-vision
+
+# Migrationen ausführen
+npx prisma migrate deploy
+
+# Prisma Studio (für Datenbank-Management)
+npx prisma studio
+```
 
 ## Troubleshooting
 
-### Common Issues
+### App startet nicht
 
-1. **Build Failures**: The application uses a Dockerfile that handles the build process. If build fails, check:
-   - Environment variables are properly set
-   - Dockerfile has proper node version (18+)
+1. **Logs prüfen:**
+   ```bash
+   flyctl logs --app simavi-semantic-image-vision
+   ```
 
-2. **Database Connection**: Ensure `DATABASE_URL` is properly set and the database is accessible
+2. **Secrets überprüfen:**
+   ```bash
+   flyctl secrets list --app simavi-semantic-image-vision
+   ```
 
-3. **API Key Validation**: Verify that your API keys are valid and not the example placeholder values
+3. **Datenbank-Verbindung testen:**
+   ```bash
+   flyctl ssh console --app simavi-semantic-image-vision
+   echo $DATABASE_URL
+   ```
 
-4. **Memory Issues**: The application has built-in queue management to prevent memory crashes with large batches
+### Datenbank-Probleme
 
-### Health Check
+1. **Datenbank Status prüfen:**
+   ```bash
+   flyctl postgres db list --app simavi-db
+   ```
 
-The application provides a health check endpoint at `https://your-app.fly.dev/api/health` that returns status information.
+2. **Datenbank Verbindung testen:**
+   ```bash
+   flyctl postgres connect --app simavi-db
+   ```
 
-## Security Considerations
+### Build-Fehler
 
-1. **Password Protection**: The application is protected by basic authentication using the `APP_PASSWORD` environment variable
-2. **API Keys**: Store API keys securely using Fly.io secrets
-3. **SSL**: Fly.io automatically provides HTTPS for all applications
-4. **Data Storage**: Images are stored in S3 with secure access controls
+1. **Dockerfile lokal testen:**
+   ```bash
+   docker build -t simavi-test .
+   docker run -p 3000:3000 simavi-test
+   ```
 
-## Scaling
+2. **Build-Logs anzeigen:**
+   Die Build-Logs werden während `flyctl deploy` angezeigt.
 
-The Fly.io configuration includes:
-- Auto-scaling based on traffic
-- Proper resource allocation (1 CPU, 1GB RAM)
-- Automatic start/stop for cost optimization
+## Wichtige Befehle
 
-## Updating the Application
+```bash
+# App neu starten
+flyctl apps restart simavi-semantic-image-vision
 
-To deploy updates:
-1. Make your changes to the code
-2. Run `fly deploy` from the `foto_identifikation_system/nextjs_space` directory
+# App skalieren (mehr Ressourcen)
+flyctl scale vm shared-cpu-2x --app simavi-semantic-image-vision
+flyctl scale memory 2048 --app simavi-semantic-image-vision
+
+# App löschen (Vorsicht!)
+flyctl apps destroy simavi-semantic-image-vision
+
+# Kosten überwachen
+flyctl apps list
+```
+
+## Konfiguration anpassen
+
+Nach Änderungen an der Konfiguration (fly.toml, Dockerfile):
+
+```bash
+flyctl deploy
+```
+
+Die App wird automatisch neu gebaut und deployed.
+
+## Kostenoptimierung
+
+Der Free Tier von Fly.io beinhaltet:
+- 3 shared-cpu-1x 256mb VMs
+- 3GB persistenten Speicher
+- 160GB ausgehender Datenverkehr
+
+Um Kosten zu sparen:
+- `auto_stop_machines = true` (bereits konfiguriert)
+- `min_machines_running = 0` (bereits konfiguriert)
+- Die App stoppt automatisch bei Inaktivität
+
+## Weitere Ressourcen
+
+- [Fly.io Dokumentation](https://fly.io/docs/)
+- [Fly.io PostgreSQL Dokumentation](https://fly.io/docs/postgres/)
+- [Next.js auf Fly.io](https://fly.io/docs/languages-and-frameworks/nextjs/)
+- [Prisma Deployment Guides](https://www.prisma.io/docs/guides/deployment)
 
 ## Support
 
-For issues with the deployment process:
-1. Check the Fly.io logs using `fly logs`
-2. Verify all environment variables are properly set
-3. Ensure your LLM API keys have sufficient quota
+Bei Problemen:
+1. Fly.io Community Forum: https://community.fly.io/
+2. Fly.io Discord: https://fly.io/discord
+3. GitHub Issues: Dokumentieren Sie Probleme in Ihrem Repository
