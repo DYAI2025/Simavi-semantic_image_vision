@@ -35,8 +35,7 @@ jobs:
         npm ci
 
     - name: Run VLM connectivity test
-      run: |
-        node ../../test-vlm-connectivity.js
+      run: node test-vlm-connectivity.js
       env:
         HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
