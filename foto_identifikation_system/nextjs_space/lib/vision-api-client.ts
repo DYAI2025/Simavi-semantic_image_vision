@@ -162,13 +162,6 @@ Verwende nur deutsche Begriffe und halte sie kurz und prägnant. Für die Ort-Ka
   }
 
   // Validate we have something usable
-  if (!location || location.length === 0) {
-    location = 'Unbekannt';
-  }
-  if (!scene || scene.length === 0) {
-    scene = 'standard';
-  }
-
   return { location, scene };
 }
 
