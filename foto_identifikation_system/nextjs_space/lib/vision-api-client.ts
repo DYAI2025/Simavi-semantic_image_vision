@@ -272,68 +272,55 @@ export async function analyzeImage(
 
   console.log(`[Vision] Starting analysis for: ${fileName} (${base64.length} bytes base64)`);
 
-  // Versuch 1: Hugging Face (kostenlos)
-  try {
-    console.log(`[Vision] Attempting HF Analysis: ${fileName}`);
-    const result = await retry(() => analyzeWithHuggingFace(base64, placeName));
-    console.log(`[Vision] HF Success for ${fileName}:`, result);
-    return result;
-  } catch (hfError: any) {
-    console.warn(`[Vision] HF failed for ${fileName}: ${hfError.message}`);
-  }
-
-  // Versuch 2: OpenAI Fallback
-  try {
-    console.log(`[Vision] Attempting OpenAI Fallback: ${fileName}`);
-    const result = await retry(() => analyzeWithOpenAI(base64, placeName));
-    console.log(`[Vision] OpenAI Success for ${fileName}:`, result);
-    return result;
-  } catch (openaiError: any) {
-    console.error(`[Vision] Both providers failed for ${fileName}: ${openaiError.message}`);
-  }
-
-  // Absolute Fallback - Generate safe filename
-  console.warn(`[Vision] Using fallback naming for ${fileName}`);
-  const safeName = fileName.split('.')[0].replace(/[^a-zA-Z0-9]/g, '-').substring(0, 20);
-  return {
-    location: 'Unbekannt',
-    scene: safeName || 'Fehler'
-  
   // Check if API keys are configured properly
-  const hasHuggingFaceKey = process.env.HUGGINGFACE_API_KEY && process.env.HUGGINGFACE_API_KEY !== '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';
-  const hasOpenAIKey = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== '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';
+  const hasHuggingFaceKey = Boolean(
+    process.env.HUGGINGFACE_API_KEY &&
+    process.env.HUGGINGFACE_API_KEY !== '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'
+  );
+  const hasOpenAIKey = Boolean(
+    process.env.OPENAI_API_KEY &&
+    process.env.OPENAI_API_KEY !== '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'
+  );
 
   if (hasHuggingFaceKey) {
     // Versuch 1: Hugging Face (kostenlos)
     try {
-      console.log(`[Vision] HF Analysis: ${fileName}`);
-      return await retry(() => analyzeWithHuggingFace(base64, placeName));
+      console.log(`[Vision] Attempting HF Analysis: ${fileName}`);
+      const result = await retry(() => analyzeWithHuggingFace(base64, placeName));
+      console.log(`[Vision] HF Success for ${fileName}:`, result);
+      return result;
     } catch (hfError: any) {
-      console.warn(`[Vision] HF failed: ${hfError.message}`);
+      console.warn(`[Vision] HF failed for ${fileName}: ${hfError.message}`);
     }
+  } else {
+    console.warn(`[Vision] Skipping HF Analysis for ${fileName}: API key not configured.`);
   }
 
   if (hasOpenAIKey) {
     // Versuch 2: OpenAI Fallback
     try {
-      console.log(`[Vision] OpenAI Fallback: ${fileName}`);
-      return await retry(() => analyzeWithOpenAI(base64, placeName));
+      console.log(`[Vision] Attempting OpenAI Fallback: ${fileName}`);
+      const result = await retry(() => analyzeWithOpenAI(base64, placeName));
+      console.log(`[Vision] OpenAI Success for ${fileName}:`, result);
+      return result;
     } catch (openaiError: any) {
-      console.error(`[Vision] OpenAI failed: ${openaiError.message}`);
+      console.error(`[Vision] OpenAI failed for ${fileName}: ${openaiError.message}`);
     }
+  } else {
+    console.warn(`[Vision] Skipping OpenAI Analysis for ${fileName}: API key not configured.`);
   }
 
   // Development/Test Fallback - simulate AI analysis results
-  console.log(`[Vision] Using development fallback for ${fileName}`);
-  
-  // Simple simulation based on filename or default values
+  console.warn(`[Vision] Using fallback analysis for ${fileName}`);
+
+  const safeName = fileName.split('.')[0].replace(/[^a-zA-Z0-9]/g, '-').substring(0, 20);
   const baseName = fileName.split('.')[0].substring(0, 20);
   const locations = ['Strand', 'Restaurant', 'Park', 'Wald', 'Buergersteig', 'Innenraum', 'Gebaeude', 'Auto', 'Schild'];
   const scenes = ['sonnig', 'bewoelkt', 'dunkel', 'hell', 'gemuetlich', 'modern', 'Nacht', 'standard'];
-  
+
   // For testing purposes, return predictable but varied results
   const location = locations[Math.abs(baseName.hashCode()) % locations.length] || 'Unbekannt';
-  const scene = scenes[Math.abs(baseName.hashCode()) % scenes.length] || 'standard';
+  const scene = scenes[Math.abs(baseName.hashCode()) % scenes.length] || safeName || 'standard';
 
   return {
     location: location,
