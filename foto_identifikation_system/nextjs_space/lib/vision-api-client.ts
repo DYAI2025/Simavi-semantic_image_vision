@@ -13,7 +13,15 @@ async function retry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
       return await fn();
     } catch (err: any) {
       // Don't retry on certain errors (503 model loading, 401/403 auth errors)
-      if (err.message.includes('503') || err.message.includes('401') || err.message.includes('403')) {
+      const status = err?.status ?? err?.response?.status;
+      if (
+        status === 503 || status === 401 || status === 403 ||
+        (typeof err.message === 'string' && (
+          err.message.includes('503') ||
+          err.message.includes('401') ||
+          err.message.includes('403')
+        ))
+      ) {
         console.warn(`[Retry] Non-retryable error detected: ${err.message}`);
         throw err;
       }
