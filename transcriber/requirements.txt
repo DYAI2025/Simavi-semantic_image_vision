@@ -1,0 +1,25 @@
+# Core dependencies
+openai-whisper>=20231117
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Speaker diarization
+pyannote.audio>=3.1.0
+pyannote.core>=5.0.0
+
+# UI
+gradio>=4.0.0
+
+# Audio processing
+pydub>=0.25.1
+soundfile>=0.12.1
+librosa>=0.10.0
+
+# Export functionality
+reportlab>=4.0.0
+fpdf2>=2.7.0
+
+# Utilities
+python-dotenv>=1.0.0
+numpy>=1.24.0
+pandas>=2.0.0
